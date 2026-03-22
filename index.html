@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SalsiMesh SNR Visualizer | IPETyM 61</title>
+
+    <!-- 
+    Arquitectura de Información - Versión 2.23 (Multi-Layer Edition):
+    1. Control de Capas: Se agrega un checkbox junto a cada archivo CSV para mostrar/ocultar sus puntos.
+    2. Filtrado Dinámico: El panel de estadísticas se actualiza automáticamente según los archivos visibles.
+    3. Internacionalización: Soporte bilingüe completo.
+    4. Brillo Táctico: High Contrast Glow (.text-neon-glow) en indicadores críticos.
+    5. Tipografía: JetBrains Mono para máxima claridad en datos técnicos.
+    -->
+
+    <!-- Chosen Palette: Hacker Dark (#030303, #00ff41, #00f3ff, #ff0055) -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700;800&display=swap" rel="stylesheet" crossorigin="anonymous">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js"></script>
+
+    <style>
+        :root {
+            --neon-green: #00ff41;
+            --neon-blue: #00f3ff;
+            --dark-bg: #030303;
+        }
+        body { 
+            height: 100%; margin: 0; 
+            background-color: var(--dark-bg);
+            color: var(--neon-green);
+            font-family: 'JetBrains Mono', monospace;
+            display: flex; flex-direction: column;
+        }
+        #map { flex-grow: 1; width: 100%; background: #000; z-index: 1; }
+
+        .neon-panel {
+            background: rgba(0, 0, 0, 0.85);
+            border: 1px solid var(--neon-green);
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
+            padding: 16px;
+            pointer-events: auto !important;
+            backdrop-filter: blur(8px);
+        }
+        
+        .neon-title {
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-size: 11px;
+            margin-bottom: 14px;
+            color: var(--neon-green);
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            padding-bottom: 8px;
+            text-shadow: 0 0 8px rgba(0, 255, 65, 0.5);
+        }
+
+        .text-neon-glow {
+            color: #4ade80; /* green-400 */
+            text-shadow: 0 0 5px rgba(74, 222, 128, 0.4);
+        }
+
+        .scanline {
+            width: 100%; height: 100px; z-index: 2000;
+            background: linear-gradient(0deg, rgba(0, 255, 65, 0) 0%, rgba(0, 255, 65, 0.02) 50%, rgba(0, 255, 65, 0) 100%);
+            opacity: 0.3; position: fixed; pointer-events: none;
+            animation: scanline 12s linear infinite;
+        }
+        @keyframes scanline { 0% { top: -100px; } 100% { top: 100%; } }
+
+        .leaflet-control-layers {
+            background: #111 !important; color: var(--neon-green) !important;
+            border: 1px solid var(--neon-green) !important; font-size: 10px;
+            text-transform: uppercase;
+        }
+
+        .custom-popup .leaflet-popup-content-wrapper {
+            background: #050505; color: #fff;
+            border: 1px solid var(--neon-green); border-radius: 4px;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.4);
+            padding: 0;
+        }
+        .custom-popup .leaflet-popup-content { margin: 0; width: 240px !important; }
+        .custom-popup .leaflet-popup-tip { background: var(--neon-green); }
+
+        input[type="checkbox"], input[type="radio"] { 
+            accent-color: var(--neon-green); cursor: pointer; 
+        }
+
+        .exporting-state { background: var(--neon-green) !important; color: black !important; cursor: wait; }
+    </style>
+</head>
+<body class="overflow-hidden">
+    <div class="scanline"></div>
+
+    <!-- Barra de Navegación Superior -->
+    <nav class="bg-black/95 text-green-500 h-[75px] px-6 flex items-center justify-between border-b border-green-900 z-[1100] shrink-0 shadow-[0_0_20px_rgba(0,255,65,0.1)]">
+        <div class="flex items-center space-x-6">
+            <!-- Botón Sidebar -->
+            <button onclick="toggleSidebar()" class="p-2 border border-green-500 bg-green-500/10 hover:bg-green-500/20 rounded-md transition-all group shadow-[0_0_10px_rgba(0,255,65,0.2)]">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-green-500 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+            </button>
+            <div class="flex flex-col">
+                <h1 class="text-base font-extrabold uppercase tracking-[0.2em] leading-none mb-1" data-i18n="app_title">VISUALIZADOR SNR</h1>
+                <p class="text-[10px] text-green-800 font-mono tracking-tighter uppercase opacity-80" data-i18n="app_subtitle">Proyecto SalsiMesh // Hacker_mode_V2.23 // etolocka</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center space-x-4">
+            <!-- Selector Idioma -->
+            <div class="flex bg-black border border-green-900 p-1 rounded text-[10px] font-bold">
+                <button onclick="setLanguage('es')" id="btn-es" class="px-2 py-1 rounded bg-green-900 text-white transition-all uppercase">ES</button>
+                <button onclick="setLanguage('en')" id="btn-en" class="px-2 py-1 rounded text-green-900 transition-all uppercase">EN</button>
+            </div>
+            
+            <button id="exportBtn" onclick="handleExportClick()" class="bg-cyan-500/10 border border-cyan-500 hover:bg-cyan-500 hover:text-black text-cyan-500 px-4 py-2 rounded text-[11px] font-extrabold transition-all uppercase flex items-center shadow-[0_0_15px_rgba(0,243,255,0.3)] min-w-[100px] justify-center tracking-widest text-center">
+                <span id="exportText" data-i18n="btn_export">EXPORTAR</span>
+            </button>
+
+            <label class="cursor-pointer">
+                <input type="file" id="csvFile" accept=".csv" multiple class="hidden"/>
+                <span class="bg-green-500/10 border border-green-500 hover:bg-green-500 hover:text-black text-green-500 px-4 py-2 rounded text-[11px] font-extrabold transition-all uppercase flex items-center shadow-[0_0_15px_rgba(0,255,65,0.3)] tracking-widest active:scale-95 text-center" data-i18n="btn_load">
+                    CARGAR_CSV
+                </span>
+            </label>
+        </div>
+    </nav>
+
+    <div class="flex flex-grow relative overflow-hidden">
+        <!-- Sidebar lateral con lista de archivos -->
+        <aside id="fileSidebar" class="absolute top-0 left-0 h-full w-80 bg-black/95 z-[1050] -translate-x-full transition-transform border-r border-green-900 overflow-y-auto p-5">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-green-500 font-extrabold text-xs uppercase tracking-[0.2em]" data-i18n="sidebar_title">ARCHIVOS CSV</h2>
+                <button onclick="toggleSidebar()" class="text-green-800 hover:text-red-500 font-bold text-2xl transition-colors">✕</button>
+            </div>
+            <div id="fileList" class="space-y-3 text-[11px]"></div>
+        </aside>
+
+        <div id="map"></div>
+
+        <!-- Overlays -->
+        <div class="absolute top-4 right-6 z-[1000] neon-panel w-32">
+            <div class="flex flex-col space-y-3 text-[11px] font-extrabold text-white uppercase">
+                <label class="flex items-center cursor-pointer hover:text-green-400 transition-colors">
+                    <input type="radio" name="maptype" value="TERMINAL" checked onchange="changeMap(this.value)" class="mr-3"> <span data-i18n="map_carto">CARTO</span>
+                </label>
+                <label class="flex items-center cursor-pointer hover:text-green-400 transition-colors">
+                    <input type="radio" name="maptype" value="OSM" onchange="changeMap(this.value)" class="mr-3"> <span data-i18n="map_osm">OSM</span>
+                </label>
+                <label class="flex items-center cursor-pointer hover:text-green-400 transition-colors">
+                    <input type="radio" name="maptype" value="RECON_SAT" onchange="changeMap(this.value)" class="mr-3"> <span data-i18n="map_sat">ESRI</span>
+                </label>
+                <label class="flex items-center cursor-pointer hover:text-green-400 transition-colors">
+                    <input type="radio" name="maptype" value="TERRENO" onchange="changeMap(this.value)" class="mr-3"> <span data-i18n="map_topo">TOPO</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Panel de Estadísticas -->
+        <div id="statsPanel" class="absolute bottom-10 left-6 z-[1000] neon-panel w-52 hidden">
+            <div class="neon-title" data-i18n="stat_title">ESTADÍSTICAS</div>
+            <div class="space-y-4 text-[11px]">
+                <div class="flex justify-between border-b border-white/10 pb-1">
+                    <span class="text-neon-glow font-extrabold" data-i18n="stat_pkts">PUNTOS:</span>
+                    <span id="stat_count" class="text-white font-extrabold text-sm">000</span>
+                </div>
+                <div class="flex justify-between border-b border-white/10 pb-1">
+                    <span class="text-neon-glow font-extrabold uppercase" data-i18n="stat_max_snr">SNR MÁX.:</span>
+                    <span class="text-green-400 font-extrabold text-sm"><span id="stat_snr_max">0.00</span> dB</span>
+                </div>
+                <div class="flex justify-between border-b border-white/10 pb-1">
+                    <span class="text-neon-glow font-extrabold uppercase" data-i18n="stat_min_snr">SNR MÍN.:</span>
+                    <span class="text-red-500 font-extrabold text-sm"><span id="stat_snr_min">0.00</span> dB</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-neon-glow font-extrabold uppercase" data-i18n="stat_max_dist">DIST. MÁX.:</span>
+                    <span class="text-cyan-400 font-extrabold text-sm"><span id="stat_dist">0</span> m</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel de Leyenda SNR -->
+        <div id="legendPanel" class="absolute bottom-10 right-6 z-[1000] neon-panel w-56">
+            <div class="neon-title" data-i18n="legend_title">SNR (dB)</div>
+            <div id="legendBody" class="space-y-3"></div>
+        </div>
+    </div>
+
+    <script>
+        const translations = {
+            es: {
+                app_title: "VISUALIZADOR SNR",
+                app_subtitle: "Proyecto SalsiMesh // Hacker_mode_V2.23 // etolocka",
+                btn_export: "EXPORTAR",
+                btn_load: "CARGAR_CSV",
+                btn_exporting: "GENERANDO...",
+                sidebar_title: "ARCHIVOS CSV",
+                sidebar_empty: "No hay registros cargados",
+                stat_title: "ESTADÍSTICAS",
+                stat_pkts: "PUNTOS:",
+                stat_max_snr: "SNR MÁX.:",
+                stat_min_snr: "SNR MÍN.:",
+                stat_max_dist: "DIST. MÁX.:",
+                legend_title: "SNR (dB)",
+                map_carto: "CARTO",
+                map_osm: "OSM",
+                map_sat: "ESRI",
+                map_topo: "TOPO",
+                popup_dist: "Dist.",
+                popup_date: "Fecha",
+                popup_time: "Hora",
+                popup_payload: "PAYLOAD",
+                node_label: "SENSOR_NODE"
+            },
+            en: {
+                app_title: "SNR VISUALIZER",
+                app_subtitle: "SalsiMesh Project // Hacker_mode_V2.23 // etolocka",
+                btn_export: "EXPORT",
+                btn_load: "LOAD_CSV",
+                btn_exporting: "GENERATING...",
+                sidebar_title: "CSV FILES",
+                sidebar_empty: "No logs loaded",
+                stat_title: "STATISTICS",
+                stat_pkts: "POINTS:",
+                stat_max_snr: "MAX SNR:",
+                stat_min_snr: "MIN SNR:",
+                stat_max_dist: "MAX DIST.:",
+                legend_title: "SNR (dB)",
+                map_carto: "CARTO",
+                map_osm: "OSM",
+                map_sat: "ESRI",
+                map_topo: "TOPO",
+                popup_dist: "Dist.",
+                popup_date: "Date",
+                popup_time: "Time",
+                popup_payload: "PAYLOAD",
+                node_label: "SENSOR_NODE"
+            }
+        };
+
+        let currentLang = 'es';
+        let map, markersGroup, baseMapsLayers;
+        let uploadedFiles = []; 
+        let snrFilters = { 'range_1': true, 'range_2': true, 'range_3': true, 'range_4': true, 'range_5': true, 'range_6': true };
+        let snrCounts = { 'range_1': 0, 'range_2': 0, 'range_3': 0, 'range_4': 0, 'range_5': 0, 'range_6': 0 };
+
+        function toggleSidebar() { document.getElementById('fileSidebar').classList.toggle('-translate-x-full'); }
+
+        function setLanguage(lang) {
+            currentLang = lang;
+            document.getElementById('btn-es').className = `px-2 py-1 rounded transition-all ${lang === 'es' ? 'bg-green-900 text-white' : 'text-green-900'}`;
+            document.getElementById('btn-en').className = `px-2 py-1 rounded transition-all ${lang === 'en' ? 'bg-green-900 text-white' : 'text-green-900'}`;
+            
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                el.innerText = translations[lang][key];
+            });
+            
+            updateLegendUI(); renderAllMarkers(false); updateSidebarUI();
+        }
+
+        function initMap() {
+            const terminal = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; CartoDB', crossOrigin: 'anonymous' });
+            const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM', crossOrigin: 'anonymous' });
+            const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; ESRI', crossOrigin: 'anonymous' });
+            const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '&copy; Topo', crossOrigin: 'anonymous' });
+            baseMapsLayers = { "TERMINAL": terminal, "OSM": osm, "RECON_SAT": esri, "TERRENO": topo };
+            map = L.map('map', { center: [-31.140, -64.295], zoom: 15, layers: [terminal], zoomControl: true });
+            markersGroup = L.featureGroup().addTo(map);
+        }
+
+        function changeMap(key) {
+            Object.values(baseMapsLayers).forEach(layer => map.removeLayer(layer));
+            map.addLayer(baseMapsLayers[key]);
+        }
+
+        function getColor(snr) {
+            if (snr > 10) return '#00f3ff'; if (snr > 5) return '#00ff41'; if (snr > 0) return '#ccff00';
+            if (snr > -5) return '#ff9100'; if (snr > -10) return '#ff0055'; return '#bc13fe';               
+        }
+
+        function updateLegendUI() {
+            const container = document.getElementById('legendBody');
+            const ranges = [
+                { id: 'range_1', label: "> 10", color: '#00f3ff' },
+                { id: 'range_2', label: "10 a 5", color: '#00ff41' },
+                { id: 'range_3', label: "5 a 0", color: '#ccff00' },
+                { id: 'range_4', label: "0 a -5", color: '#ff9100' },
+                { id: 'range_5', label: "-5 a -10", color: '#ff0055' },
+                { id: 'range_6', label: "< -10", color: '#bc13fe' }
+            ];
+            container.innerHTML = ranges.map(r => `
+                <div class="flex items-center text-[11px] cursor-pointer hover:bg-white/5 p-1 rounded transition-colors" onclick="toggleSnrFilter('${r.id}')">
+                    <input type="checkbox" ${snrFilters[r.id] ? 'checked' : ''} class="mr-3" onclick="event.stopPropagation(); toggleSnrFilter('${r.id}')">
+                    <i class="w-3 h-3 rounded-sm mr-3" style="background:${r.color}; box-shadow: 0 0 10px ${r.color}"></i>
+                    <span class="text-white/80 font-extrabold tracking-wider">${r.label}</span>
+                    <span class="ml-auto text-neon-glow font-extrabold">[${String(snrCounts[r.id] || 0).padStart(3, '0')}]</span>
+                </div>
+            `).join('');
+        }
+
+        function toggleSnrFilter(id) { snrFilters[id] = !snrFilters[id]; renderAllMarkers(false); updateLegendUI(); }
+
+        document.getElementById('csvFile').addEventListener('change', function(e) {
+            Array.from(e.target.files).forEach(file => {
+                Papa.parse(file, {
+                    header: true, dynamicTyping: true, skipEmptyLines: true,
+                    complete: (results) => {
+                        uploadedFiles.push({ id: crypto.randomUUID(), name: file.name, data: results.data, active: true });
+                        renderAllMarkers(true); updateSidebarUI();
+                    }
+                });
+            });
+            e.target.value = '';
+        });
+
+        function updateSidebarUI() {
+            const container = document.getElementById('fileList');
+            if (uploadedFiles.length === 0) {
+                container.innerHTML = `<p class="text-green-900 italic text-center">${translations[currentLang].sidebar_empty}</p>`;
+                return;
+            }
+            container.innerHTML = uploadedFiles.map(file => `
+                <div class="p-3 border border-green-900 rounded mb-2 bg-green-500/5 hover:bg-green-500/10 transition-colors">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-3 truncate">
+                            <!-- Checkbox para mostrar/ocultar puntos de este archivo específico -->
+                            <input type="checkbox" ${file.active ? 'checked' : ''} onchange="toggleFile('${file.id}')" class="w-4 h-4 cursor-pointer">
+                            <span class="truncate font-extrabold text-white tracking-tight">${file.name}</span>
+                        </div>
+                        <button onclick="deleteFile('${file.id}')" class="text-red-900 hover:text-red-500 font-black ml-2 px-1">✕</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleFile(id) { 
+            const file = uploadedFiles.find(f => f.id === id);
+            if (file) {
+                file.active = !file.active;
+                renderAllMarkers(false); // Refrescar mapa sin reajustar zoom
+                updateSidebarUI(); // Refrescar lista de archivos
+            }
+        }
+
+        function deleteFile(id) { uploadedFiles = uploadedFiles.filter(f => f.id !== id); renderAllMarkers(true); updateSidebarUI(); }
+
+        function renderAllMarkers(shouldFit = false) {
+            markersGroup.clearLayers();
+            let stats = { count: 0, maxSnr: -Infinity, minSnr: Infinity, maxDist: 0 };
+            const t = translations[currentLang];
+            Object.keys(snrCounts).forEach(k => snrCounts[k] = 0);
+
+            // Solo iteramos por archivos que tengan la propiedad active: true
+            uploadedFiles.filter(f => f.active).forEach(file => {
+                file.data.forEach(row => {
+                    const lat = row['rx lat'], lng = row['rx long'], snr = row['rx snr'], dist = row['distance(m)'];
+                    if (!lat || isNaN(lat)) return;
+
+                    let rid = snr > 10 ? 'range_1' : snr > 5 ? 'range_2' : snr > 0 ? 'range_3' : snr > -5 ? 'range_4' : snr > -10 ? 'range_5' : 'range_6';
+                    snrCounts[rid]++;
+                    
+                    if (snrFilters[rid]) {
+                        const color = getColor(snr);
+                        const m = L.circleMarker([lat + (Math.random()-0.5)*0.0001, lng + (Math.random()-0.5)*0.0001], {
+                            radius: 8, fillColor: color, color: "#000", weight: 1, fillOpacity: 0.95
+                        });
+                        m.on('add', function() { if (this._path) this._path.style.filter = `drop-shadow(0 0 6px ${color})`; });
+                        
+                        m.bindPopup(`
+                            <div class="font-mono text-[11px] bg-black text-white overflow-hidden">
+                                <div class="bg-green-900/40 p-3 border-b border-green-500">
+                                    <div class="text-[9px] text-green-400 font-bold uppercase tracking-widest mb-1">${t.node_label}</div>
+                                    <div class="text-sm font-extrabold uppercase truncate">${row['sender name'] || 'NODE_UNKNOWN'}</div>
+                                </div>
+                                <div class="p-3 grid grid-cols-2 gap-y-2 gap-x-4 border-b border-white/10">
+                                    <div><span class="text-green-500/60 font-bold text-[9px] uppercase">SNR:</span><br><span class="font-extrabold">${snr} dB</span></div>
+                                    <div><span class="text-green-500/60 font-bold text-[9px] uppercase">${t.popup_dist}:</span><br><span class="font-extrabold text-cyan-400">${dist} m</span></div>
+                                    <div><span class="text-green-500/60 font-bold text-[9px] uppercase">${t.popup_date}:</span><br><span>${row['date'] || '--'}</span></div>
+                                    <div><span class="text-green-500/60 font-bold text-[9px] uppercase">${t.popup_time}:</span><br><span>${row['time'] || '--'}</span></div>
+                                </div>
+                                <div class="p-3 bg-white/5 italic opacity-70 text-[9px] truncate">SRC: ${file.name}</div>
+                            </div>
+                        `, { className: 'custom-popup', maxWidth: 260 });
+                        
+                        markersGroup.addLayer(m);
+                        stats.count++;
+                        if (snr > stats.maxSnr) stats.maxSnr = snr; if (snr < stats.minSnr) stats.minSnr = snr; if (dist > stats.maxDist) stats.maxDist = dist;
+                    }
+                });
+            });
+
+            const panel = document.getElementById('statsPanel');
+            if (stats.count > 0) {
+                panel.classList.remove('hidden');
+                document.getElementById('stat_count').innerText = String(stats.count).padStart(3, '0');
+                document.getElementById('stat_snr_max').innerText = stats.maxSnr.toFixed(2);
+                document.getElementById('stat_snr_min').innerText = stats.minSnr.toFixed(2);
+                document.getElementById('stat_dist').innerText = Math.round(stats.maxDist);
+            } else { panel.classList.add('hidden'); }
+            updateLegendUI();
+            if (shouldFit && stats.count > 0) map.fitBounds(markersGroup.getBounds(), { padding: [60, 60] });
+        }
+
+        async function handleExportClick() {
+            const btn = document.getElementById('exportBtn');
+            const text = document.getElementById('exportText');
+            const t = translations[currentLang];
+            btn.classList.add('exporting-state');
+            text.innerText = t.btn_exporting;
+            try {
+                const dataUrl = await htmlToImage.toPng(document.body, { pixelRatio: 2, skipFonts: true, style: { fontFamily: 'JetBrains Mono' } });
+                const link = document.createElement('a');
+                link.download = `SalsiMesh_Recon_${new Date().toISOString().slice(0,10)}.png`;
+                link.href = dataUrl; link.click();
+            } catch (e) { console.error(e); } 
+            finally { btn.classList.remove('exporting-state'); text.innerText = t.btn_export; }
+        }
+
+        window.onload = () => { initMap(); setLanguage('es'); };
+    </script>
+</body>
+</html>
